@@ -3,7 +3,7 @@
 
 
 ## 使用方法
-需安装[Java](https://www.java.com/zh-CN/download/)作为运行环境，在<code>命令提示符(CMD)</code>或<code>Bash</code>运行下列代码。
+安装[Java](https://www.java.com/zh-CN/download/)作为运行环境后，在<code>命令提示符(CMD)</code>或<code>Bash</code>运行下列代码。
 
 <code>java -jar Rainyun-Qiandao.jar <用户名> <密码></code>
 
