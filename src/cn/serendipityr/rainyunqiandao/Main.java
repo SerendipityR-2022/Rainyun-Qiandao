@@ -14,7 +14,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Main {
+    public static String version = "1.0";
+
     public static void main(String[] args) {
+        System.out.println(getTimeStr() + "------------------------------------------------------------------");
+        System.out.println(getTimeStr() + "雨云签到工具 " + version + " by SerendipityR ~");
+        System.out.println(getTimeStr() + "Github发布页: https://github.com/SerendipityR-2022/Rainyun-Qiandao");
+        System.out.println(getTimeStr() + "------------------------------------------------------------------");
+
         if (args.length != 2) {
             System.out.println(getTimeStr() + "无法执行任务，参数不正确！");
             System.out.println(getTimeStr() + "正确用法: java -jar ***.jar (用户名) (密码)");
@@ -29,7 +36,6 @@ public class Main {
 
     public static void start(String username, String password) {
         Map<String, String> loginHeaders = new HashMap<>();
-
         Map<String, String> result_1 = doLogin(username, password);
 
         if (result_1.containsKey("Error")) {
