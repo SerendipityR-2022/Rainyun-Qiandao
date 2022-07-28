@@ -57,7 +57,7 @@ public class Main {
                 System.out.println(getTimeStr() + "签到失败: " + result_2.get("Error"));
             }
         } else {
-            if (result_2.get("result") == null) {
+            if (result_2.get("result").contains("ok")) {
                 System.out.println(getTimeStr() + "签到结果: " + "成功！");
             } else {
                 System.out.println(getTimeStr() + "签到结果: " + result_2.get("result"));
@@ -174,15 +174,19 @@ public class Main {
         final_result.put("result", result.toString());
         StringBuilder cookies = new StringBuilder();
 
-        for (String cookie:conn.getHeaderFields().get("Set-Cookie")) {
-            if (cookies.toString().contains(";")) {
-                cookies.append("; ").append(cookie);
-            } else {
-                cookies.append(cookie).append("; ");
+        try {
+            for (String cookie:conn.getHeaderFields().get("Set-Cookie")) {
+                if (cookies.toString().contains(";")) {
+                    cookies.append("; ").append(cookie);
+                } else {
+                    cookies.append(cookie).append("; ");
+                }
             }
-        }
 
-        final_result.put("cookie", cookies.toString());
+            final_result.put("cookie", cookies.toString());
+        } catch (Exception e) {
+            final_result.put("cookie", null);
+        }
 
         return final_result;
     }
