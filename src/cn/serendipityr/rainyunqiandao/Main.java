@@ -14,22 +14,33 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Main {
-    public static String version = "1.0";
+    public static String version = "1.1";
+    public static Integer maxDelay = null;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         System.out.println(getTimeStr() + "------------------------------------------------------------------");
         System.out.println(getTimeStr() + "雨云签到工具 " + version + " by SerendipityR ~");
         System.out.println(getTimeStr() + "Github发布页: https://github.com/SerendipityR-2022/Rainyun-Qiandao");
         System.out.println(getTimeStr() + "------------------------------------------------------------------");
 
-        if (args.length != 2) {
+        if (args.length != 2 && args.length != 3) {
             System.out.println(getTimeStr() + "无法执行任务，参数不正确！");
-            System.out.println(getTimeStr() + "正确用法: java -jar ***.jar (用户名) (密码)");
+            System.out.println(getTimeStr() + "正确用法: java -jar ***.jar (用户名) (密码) [随机延时(分钟)]");
             System.exit(0);
         }
 
         String username = args[0];
         String password = args[1];
+
+        if (args.length == 3) {
+            maxDelay = Integer.parseInt(args[2]);
+        }
+
+        if (maxDelay != null && maxDelay > 0) {
+            Integer delay = getRandomNumber(0, maxDelay);
+            System.out.println(getTimeStr() + "本次任务将延时" + delay + "分钟执行。");
+            Thread.sleep(delay * 60 * 1000);
+        }
 
         start(username, password);
     }
@@ -104,6 +115,10 @@ public class Main {
         }
 
         return "";
+    }
+
+    public static Integer getRandomNumber(int Min,int Max) {
+        return (int) (Math.random()*(Min-Max)+Max);
     }
 
     public static Map<String, String> doPost(String URL, Map<String, String> params, Map<String, String> headers) {
