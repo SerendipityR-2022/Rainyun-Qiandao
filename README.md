@@ -2,7 +2,7 @@
 雨云签到工具 搭配宝塔计划任务可实现每日自动签到~
 
 
-## 使用方法
+## 食用方法
 安装[Java](https://www.java.com/zh-CN/download/)作为运行环境后，在<code>命令提示符(CMD)</code>或<code>Bash</code>中运行下列代码。
 
 <code>java -jar Rainyun-Qiandao.jar <用户名> <密码> <最大随机延时(分钟)></code>
