@@ -3,6 +3,7 @@ package cn.serendipityr.rainyunqiandao;
 import com.alibaba.fastjson.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
@@ -14,7 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Main {
-    public static String version = "1.1";
+    public static String version = "1.2";
     public static Integer maxDelay = null;
 
     public static void main(String[] args) throws InterruptedException {
@@ -75,6 +76,18 @@ public class Main {
             }
         }
 
+        Map<String, String> result_3 = getUserInfos(loginHeaders);
+
+        if (result_3.containsKey("Error")) {
+            System.out.println(getTimeStr() + "获取积分失败: " + result_3.get("Error"));
+        } else {
+            JSONObject jsonObject = JSONObject.parseObject(result_3.get("result"));
+            JSONObject dataJSONObject = jsonObject.getJSONObject("data");
+            Integer Points = dataJSONObject.getInteger("Points");
+
+            System.out.println(getTimeStr() + "当前所有积分: " + Points + " (约" + (Points / 2000) + "元)");
+        }
+
         System.exit(0);
     }
 
@@ -117,8 +130,89 @@ public class Main {
         return "";
     }
 
+    public static Map<String, String> getUserInfos(Map<String, String> loginHeaders) {
+        return doGet("https://api.v2.rainyun.com/user/", loginHeaders);
+    }
+
     public static Integer getRandomNumber(int Min,int Max) {
         return (int) (Math.random()*(Min-Max)+Max);
+    }
+
+    public static Map<String, String> doGet(String URL, Map<String, String> extraHeader) {
+        HttpURLConnection conn;
+        InputStream is;
+        BufferedReader br;
+        StringBuilder result = new StringBuilder();
+        Map<String,String> final_result = new HashMap<>();
+
+        try {
+            // 创建连接对象
+            java.net.URL url = new URL(URL);
+            // 打开连接，强转成HTTPURLConnection
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            // 设置超时时间
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
+            // 设置请求属性
+            conn.setRequestProperty("Host", url.getHost());
+            conn.setRequestProperty("Accept", "*/*");
+            conn.setRequestProperty("Connection", "Keep-Alive");
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36");
+
+            if (extraHeader != null) {
+                for (String header : extraHeader.keySet()) {
+                    conn.setRequestProperty(header, extraHeader.get(header));
+                }
+            }
+            // 发送请求
+            conn.connect();
+
+            // 取输入流，使用Reader读取
+            if (200 == conn.getResponseCode()) {
+                is = conn.getInputStream();
+                br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    result.append(line);
+                }
+            } else {
+                is = conn.getErrorStream();
+                br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    result.append(line);
+                }
+                final_result.put("Error", conn.getResponseCode() + " | " + result);
+                return final_result;
+            }
+
+            br.close();
+            is.close();
+            conn.disconnect();
+            final_result.put("result", result.toString());
+
+            StringBuilder cookies = new StringBuilder();
+
+            try {
+                for (String cookie:conn.getHeaderFields().get("Set-Cookie")) {
+                    if (cookies.toString().contains(";")) {
+                        cookies.append("; ").append(cookie);
+                    } else {
+                        cookies.append(cookie).append("; ");
+                    }
+                }
+
+                final_result.put("cookie", cookies.toString());
+            } catch (Exception e) {
+                final_result.put("cookie", null);
+            }
+        } catch (Exception e) {
+            final_result.put("Error", "无法连接到服务器 | " + e);
+            return final_result;
+        }
+
+        return final_result;
     }
 
     public static Map<String, String> doPost(String URL, Map<String, String> params, Map<String, String> headers) {
