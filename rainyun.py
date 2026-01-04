@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -19,7 +20,27 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 
 COOKIE_FILE = "cookies.json"
+try:
+    from notify import send
 
+    print("✅ 通知模块加载成功")
+except Exception as e:
+    print(f"⚠️ 通知模块加载失败：{e}")
+
+    def send(title, content):
+        pass
+# 创建一个内存缓冲区，用于存储所有日志
+log_capture_string = io.StringIO()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 配置 logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+#输出到字符串 (新增功能)
+string_handler = logging.StreamHandler(log_capture_string)
+string_handler.setFormatter(formatter)
+logger.addHandler(string_handler)
 
 def save_cookies(driver: WebDriver):
     """保存 cookies 到文件"""
@@ -273,77 +294,98 @@ def compute_similarity(img1_path, img2_path):
 
 
 if __name__ == "__main__":
-    # 从环境变量读取配置
-    timeout = int(os.environ.get("TIMEOUT", "15"))
-    max_delay = int(os.environ.get("MAX_DELAY", "90"))
-    user = os.environ.get("RAINYUN_USER", "")
-    pwd = os.environ.get("RAINYUN_PWD", "")
-    debug = os.environ.get("DEBUG", "false").lower() == "true"
-    # 容器环境默认启用 Linux 模式
-    linux = os.environ.get("LINUX_MODE", "true").lower() == "true"
-    
-    # 检查必要配置
-    if not user or not pwd:
-        print("错误: 请设置 RAINYUN_USER 和 RAINYUN_PWD 环境变量")
-        exit(1)
+    try:
+        # 从环境变量读取配置
+        timeout = int(os.environ.get("TIMEOUT", "15"))
+        max_delay = int(os.environ.get("MAX_DELAY", "90"))
+        user = os.environ.get("RAINYUN_USER", "")
+        pwd = os.environ.get("RAINYUN_PWD", "")
+        debug = os.environ.get("DEBUG", "false").lower() == "true"
+        # 容器环境默认启用 Linux 模式
+        linux = os.environ.get("LINUX_MODE", "true").lower() == "true"
 
-    # 以下为代码执行区域，请勿修改！
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
-    ver = "2.2"
-    logger.info("------------------------------------------------------------------")
-    logger.info(f"雨云签到工具 v{ver} by SerendipityR ~")
-    logger.info("Github发布页: https://github.com/SerendipityR-2022/Rainyun-Qiandao")
-    logger.info("------------------------------------------------------------------")
-    delay = random.randint(0, max_delay)
-    delay_sec = random.randint(0, 60)
-    if not debug:
-        logger.info(f"随机延时等待 {delay} 分钟 {delay_sec} 秒")
-        time.sleep(delay * 60 + delay_sec)
-    logger.info("初始化 ddddocr")
-    ocr = ddddocr.DdddOcr(ocr=True, show_ad=False)
-    det = ddddocr.DdddOcr(det=True, show_ad=False)
-    logger.info("初始化 Selenium")
-    driver = init_selenium()
-    # 过 Selenium 检测
-    with open("stealth.min.js", mode="r") as f:
-        js = f.read()
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": js
-    })
-    wait = WebDriverWait(driver, timeout)
-    
-    # 尝试使用 cookie 登录
-    logged_in = False
-    if load_cookies(driver):
-        logged_in = check_login_status(driver, wait)
-    
-    # cookie 无效则进行正常登录
-    if not logged_in:
-        logged_in = do_login(driver, wait, user, pwd)
-    
-    if not logged_in:
-        logger.error("登录失败，退出程序")
+        # 检查必要配置
+        if not user or not pwd:
+            print("错误: 请设置 RAINYUN_USER 和 RAINYUN_PWD 环境变量")
+            exit(1)
+
+        # 以下为代码执行区域，请勿修改！
+
+        ver = "2.2"
+        logger.info("------------------------------------------------------------------")
+        logger.info(f"雨云签到工具 v{ver} by SerendipityR ~")
+        logger.info("Github发布页: https://github.com/SerendipityR-2022/Rainyun-Qiandao")
+        logger.info("------------------------------------------------------------------")
+        delay = random.randint(0, max_delay)
+        delay_sec = random.randint(0, 60)
+        if not debug:
+            logger.info(f"随机延时等待 {delay} 分钟 {delay_sec} 秒")
+            time.sleep(delay * 60 + delay_sec)
+        logger.info("初始化 ddddocr")
+        ocr = ddddocr.DdddOcr(ocr=True, show_ad=False)
+        det = ddddocr.DdddOcr(det=True, show_ad=False)
+        logger.info("初始化 Selenium")
+        driver = init_selenium()
+        # 过 Selenium 检测
+        with open("stealth.min.js", mode="r") as f:
+            js = f.read()
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": js
+        })
+        wait = WebDriverWait(driver, timeout)
+
+        # 尝试使用 cookie 登录
+        logged_in = False
+        if load_cookies(driver):
+            logged_in = check_login_status(driver, wait)
+
+        # cookie 无效则进行正常登录
+        if not logged_in:
+            logged_in = do_login(driver, wait, user, pwd)
+
+        if not logged_in:
+            logger.error("登录失败，退出程序")
+            driver.quit()
+            exit(1)
+
+        logger.info("正在转到赚取积分页")
+        driver.get("https://app.rainyun.com/account/reward/earn")
+        driver.implicitly_wait(5)
+        earn = driver.find_element(By.XPATH,
+                                   "//span[contains(text(), '每日签到')]/ancestor::div[1]//a[contains(text(), '领取奖励')]")
+        logger.info("点击赚取积分")
+        earn.click()
+        logger.info("处理验证码")
+        driver.switch_to.frame("tcaptcha_iframe_dy")
+        process_captcha()
+        driver.switch_to.default_content()
+        driver.implicitly_wait(5)
+        points_raw = driver.find_element(By.XPATH,
+                                         '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute(
+            "textContent")
+        current_points = int(''.join(re.findall(r'\d+', points_raw)))
+        logger.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
+        logger.info("任务执行成功！")
         driver.quit()
-        exit(1)
-    
-    logger.info("正在转到赚取积分页")
-    driver.get("https://app.rainyun.com/account/reward/earn")
-    driver.implicitly_wait(5)
-    earn = driver.find_element(By.XPATH,
-                               "//span[contains(text(), '每日签到')]/ancestor::div[1]//a[contains(text(), '领取奖励')]")
-    logger.info("点击赚取积分")
-    earn.click()
-    logger.info("处理验证码")
-    driver.switch_to.frame("tcaptcha_iframe_dy")
-    process_captcha()
-    driver.switch_to.default_content()
-    driver.implicitly_wait(5)
-    points_raw = driver.find_element(By.XPATH,
-                                     '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute(
-        "textContent")
-    current_points = int(''.join(re.findall(r'\d+', points_raw)))
-    logger.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
-    logger.info("任务执行成功！")
-    driver.quit()
+    except Exception as e:
+        logger.error(f"脚本执行异常终止: {e}")
+
+    finally:
+        # === 核心逻辑：无论成功失败，这里都会执行 ===
+
+        # 1. 关闭浏览器
+        try:
+            driver.quit()
+        except:
+            pass
+
+        # 2. 获取所有日志内容
+        log_content = log_capture_string.getvalue()
+
+        # 3. 发送通知
+        logger.info("正在发送通知...")
+        send("雨云签到",log_content)
+
+        # 4. 释放内存
+        log_capture_string.close()
 
