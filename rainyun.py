@@ -1,8 +1,19 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# new Env('🌧️ 雨云全自动签到');
+# cron: 30 8 * * *
+
 import logging
 import os
 import random
 import re
 import time
+import sys
+
+# --------- 青龙环境路径修复 ---------
+sys.path.extend(['/usr/lib/python3.12/site-packages', '/usr/local/lib/python3.11/site-packages'])
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import cv2
 import requests
@@ -18,18 +29,38 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 import ICR
 
+# --------- 接入青龙通知模块 ---------
+try:
+    import notify
+except ImportError:
+    notify = None
 
+def send_notification(title, content):
+    logger.info(f"【推送通知】{title}")
+    if notify:
+        try:
+            notify.send(title, content)
+            logger.info("✅ 消息推送任务已提交给青龙系统！")
+            logger.info("💡 PS：如果你手机没有收到上面的通知消息，说明你还没配置推送变量。")
+            logger.info("   解决方法：去青龙面板左侧的【环境变量】里，添加你的推送密钥。")
+            logger.info("   例如：添加变量名 QYWX_KEY (企业微信) 或 PUSH_PLUS_TOKEN (PushPlus) 等。")
+            logger.info("   (配置好后，青龙里所有脚本的通知就都能推送了!)")
+        except Exception as e:
+            logger.error(f"⚠️ 通知推送执行失败: {e}")
+    else:
+        logger.warning("⚠️ 未找到青龙 notify 模块，跳过消息推送。")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# --------- 核心 Selenium 配置 (青龙定制版) ---------
 def init_selenium() -> WebDriver:
     ops = Options()
     ops.add_argument("--no-sandbox")
-    if debug:
-        ops.add_experimental_option("detach", True)
-    if linux:
-        ops.add_argument("--headless")
-        ops.add_argument("--disable-gpu")
-        return webdriver.Chrome(service=Service("./chromedriver"), options=ops)
-    return webdriver.Chrome(service=Service("chromedriver.exe"), options=ops)
-
+    ops.add_argument("--headless")
+    ops.add_argument("--disable-gpu")
+    ops.add_argument("--disable-dev-shm-usage") # 解决Docker容器内存崩溃
+    return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=ops)
 
 def download_image(url, filename):
     os.makedirs("temp", exist_ok=True)
@@ -39,27 +70,41 @@ def download_image(url, filename):
         with open(path, "wb") as f:
             f.write(response.content)
         return True
-    else:
-        logger.error("下载图片失败！")
-        return False
-
+    return False
 
 def get_url_from_style(style):
     return re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
 
-
 def get_width_from_style(style):
     return re.search(r'width:\s*([\d.]+)px', style).group(1)
-
 
 def get_height_from_style(style):
     return re.search(r'height:\s*([\d.]+)px', style).group(1)
 
+def download_captcha_img(wait):
+    if os.path.exists("temp"):
+        for filename in os.listdir("temp"):
+            file_path = os.path.join("temp", filename)
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.remove(file_path)
+    slideBg = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="slideBg"]')))
+    img1_url = get_url_from_style(slideBg.get_attribute("style"))
+    logger.info("开始下载验证码图片(1)...")
+    download_image(img1_url, "captcha.jpg")
+    sprite = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="instruction"]/div/img')))
+    img2_url = sprite.get_attribute("src")
+    logger.info("开始下载验证码图片(2)...")
+    download_image(img2_url, "sprite.jpg")
 
-def process_captcha():
+# 引入 start_time 机制，完美防止验证码死循环
+def process_captcha(driver, wait, start_time):
+    if time.time() - start_time > 180:
+        logger.error("❌ 严重超时：验证码识别超过3分钟，疑似遇到异常死循环，已强制中断跳过！")
+        return False
+
     try:
-        download_captcha_img()
-        logger.info("开始识别验证码")
+        download_captcha_img(wait)
+        logger.info("开始识别验证码...")
         captcha = cv2.imread("temp/captcha.jpg")
         result = ICR.main("temp/captcha.jpg", "temp/sprite.jpg")
         for info in result:
@@ -73,121 +118,137 @@ def process_captcha():
             x_offset, y_offset = float(-width / 2), float(-height / 2)
             final_x, final_y = int(x_offset + x / width_raw * width), int(y_offset + y / height_raw * height)
             ActionChains(driver).move_to_element_with_offset(slideBg, final_x, final_y).click().perform()
-        confirm = wait.until(
-            EC.element_to_be_clickable((By.XPATH, '//*[@id="tcStatus"]/div[2]/div[2]/div/div')))
-        logger.info("提交验证码")
+        
+        confirm = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tcStatus"]/div[2]/div[2]/div/div')))
+        logger.info("提交验证码...")
         confirm.click()
         time.sleep(5)
+        
         result = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="tcOperation"]')))
         if result.get_attribute("class") == 'tc-opera pointer show-success':
-            logger.info("验证码通过")
-            return
+            logger.info("✅ 验证码通过！")
+            return True
         else:
-            logger.error("验证码未通过，正在重试")
-        reload = driver.find_element(By.XPATH, '//*[@id="reload"]')
-        time.sleep(5)
-        reload.click()
-        time.sleep(5)
-        process_captcha()
+            logger.warning("⚠️ 验证码未通过，正在重试...")
+            reload = driver.find_element(By.XPATH, '//*[@id="reload"]')
+            time.sleep(5)
+            reload.click()
+            time.sleep(5)
+            return process_captcha(driver, wait, start_time)
+            
     except TimeoutException:
-        logger.error("获取验证码图片失败")
+        logger.error("❌ 获取验证码图片失败！")
+        return False
+    except Exception as e:
+        logger.error(f"❌ 验证码处理异常: {e}")
+        return False
 
-
-def download_captcha_img():
-    if os.path.exists("temp"):
-        for filename in os.listdir("temp"):
-            file_path = os.path.join("temp", filename)
-            if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.remove(file_path)
-    slideBg = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="slideBg"]')))
-    img1_style = slideBg.get_attribute("style")
-    img1_url = get_url_from_style(img1_style)
-    logger.info("开始下载验证码图片(1): " + img1_url)
-    download_image(img1_url, "captcha.jpg")
-    sprite = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="instruction"]/div/img')))
-    img2_url = sprite.get_attribute("src")
-    logger.info("开始下载验证码图片(2): " + img2_url)
-    download_image(img2_url, "sprite.jpg")
-
-
-if __name__ == "__main__":
-    # 连接超时等待
-    timeout = 15
-    # 最大随机等待延时
-    max_delay = 90
-    # 用户名
-    user = "username"
-    # 密码
-    pwd = "12345678"
-    # 调试模式
-    debug = False
-    # Linux 模式
-    # [!] 在Windows环境下，带-headless参数会导致异常，应该关闭此项。
-    linux = False
-
-    # 以下为代码执行区域，请勿修改！
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
-    ver = "2.3"
-    logger.info("------------------------------------------------------------------")
-    logger.info(f"雨云签到工具 v{ver} by SerendipityR ~")
-    logger.info("Github发布页: https://github.com/SerendipityR-2022/Rainyun-Qiandao")
-    logger.info("------------------------------------------------------------------")
-    delay = random.randint(0, max_delay)
-    delay_sec = random.randint(0, 60)
-    if not debug:
-        logger.info(f"随机延时等待 {delay} 分钟 {delay_sec} 秒")
-        time.sleep(delay * 60 + delay_sec)
-    logger.info("初始化 Selenium")
+# --------- 单账号签到流程 ---------
+def run_sign_in(username, password):
+    logger.info("初始化 Selenium 驱动...")
     driver = init_selenium()
-    # 过 Selenium 检测
-    with open("stealth.min.js", mode="r") as f:
-        js = f.read()
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": js
-    })
-    logger.info("发起登录请求")
-    driver.get("https://app.rainyun.com/auth/login")
-    wait = WebDriverWait(driver, timeout)
+    status_msg = ""
     try:
-        username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
-        password = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
-        login_button = wait.until(EC.visibility_of_element_located((By.XPATH,
-                                                                    '//*[@id="app"]/div[1]/div[1]/div/div[2]/fade/div/div/span/form/button')))
-        username.send_keys(user)
-        password.send_keys(pwd)
-        login_button.click()
-    except TimeoutException:
-        logger.error("页面加载超时，请尝试延长超时时间或切换到国内网络环境！")
-        exit()
-    try:
-        login_captcha = wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
-        logger.warning("触发验证码！")
-        driver.switch_to.frame("tcaptcha_iframe_dy")
-        process_captcha()
-    except TimeoutException:
-        logger.info("未触发验证码")
-    time.sleep(5)
-    driver.switch_to.default_content()
-    if driver.current_url == "https://app.rainyun.com/dashboard":
-        logger.info("登录成功！")
-        logger.info("正在转到赚取积分页")
-        driver.get("https://app.rainyun.com/account/reward/earn")
-        driver.implicitly_wait(5)
-        earn = driver.find_element(By.XPATH,
-                                   '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div/div/div/div[1]/div/div[1]/div/div[1]/div/span[2]/a')
-        logger.info("点击赚取积分")
-        earn.click()
-        logger.info("处理验证码")
-        driver.switch_to.frame("tcaptcha_iframe_dy")
-        process_captcha()
+        if os.path.exists("stealth.min.js"):
+            with open("stealth.min.js", mode="r") as f:
+                js = f.read()
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": js})
+            
+        logger.info("发起登录请求...")
+        driver.get("https://app.rainyun.com/auth/login")
+        wait = WebDriverWait(driver, 15)
+        
+        user_input = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
+        pwd_input = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
+        login_btn = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="app"]/div[1]/div[1]/div/div[2]/fade/div/div/span/form/button')))
+        
+        user_input.send_keys(username)
+        pwd_input.send_keys(password)
+        login_btn.click()
+        
+        try:
+            wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
+            logger.warning("触发登录验证码！")
+            driver.switch_to.frame("tcaptcha_iframe_dy")
+            if not process_captcha(driver, wait, time.time()):
+                return f"账号 {username}: 登录验证码失败 ❌"
+        except TimeoutException:
+            logger.info("免验证码，直接尝试登录...")
+            
+        time.sleep(5)
         driver.switch_to.default_content()
-        driver.implicitly_wait(5)
-        points_raw = driver.find_element(By.XPATH,
-                                         '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute(
-            "textContent")
-        current_points = int(''.join(re.findall(r'\d+', points_raw)))
-        logger.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
-        logger.info("任务执行成功！")
-    else:
-        logger.error("登录失败！")
+        
+        if driver.current_url == "https://app.rainyun.com/dashboard":
+            logger.info("✅ 登录成功，转到赚取积分页...")
+            driver.get("https://app.rainyun.com/account/reward/earn")
+            driver.implicitly_wait(5)
+            earn = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div/div/div/div[1]/div/div[1]/div/div[1]/div/span[2]/a')
+            earn.click()
+            
+            logger.info("处理签到验证码...")
+            driver.switch_to.frame("tcaptcha_iframe_dy")
+            if not process_captcha(driver, wait, time.time()):
+                return f"账号 {username}: 签到验证码失败 ❌"
+                
+            driver.switch_to.default_content()
+            driver.implicitly_wait(5)
+            points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
+            current_points = int(''.join(re.findall(r'\d+', points_raw)))
+            
+            logger.info(f"🎉 任务执行成功！当前剩余积分: {current_points}")
+            status_msg = f"账号 {username}: 签到成功 ✅ (当前积分:{current_points})"
+        else:
+            logger.error("❌ 登录失败，请检查账号密码。")
+            status_msg = f"账号 {username}: 登录失败 ❌ (检查密码)"
+            
+    except Exception as e:
+        logger.error(f"❌ 流程异常: {e}")
+        status_msg = f"账号 {username}: 运行时异常 ❌"
+    finally:
+        # 无论成功失败，确保彻底关闭浏览器，防止内存泄漏
+        driver.quit()
+        logger.info("浏览器驱动已释放。")
+        
+    return status_msg
+
+# --------- 主入口 ---------
+if __name__ == "__main__":
+    ver = "2.3 (青龙二开增强版)"
+    logger.info("=" * 60)
+    logger.info(f"🌧️ 雨云签到工具 v{ver} ~")
+    logger.info("-------------当前版本为二开版本，原作者信息在上面-------------")
+    logger.info("二开作者Q:16745603          交流讨论群:851107003")
+    logger.info("本项目仅作为学习参考，请勿用于其他用途!")
+    logger.info("=" * 60)
+
+    env_str = os.environ.get("RAINYUN_USERS")
+    if not env_str:
+        logger.error("❌ 未找到环境变量 RAINYUN_USERS，请在青龙面板配置。")
+        logger.info("💡 配置变量：账号,密码  多账号可换行配置！")
+        sys.exit(1)
+    
+    accounts = []
+    for line in env_str.replace('&', '\n').split('\n'):
+        if not line.strip(): continue
+        parts = line.split(',')
+        if len(parts) >= 2:
+            accounts.append({"username": parts[0].strip(), "password": parts[1].strip()})
+
+    logger.info(f"\n🚀 准备就绪，开始执行 {len(accounts)} 个账号的自动签到...")
+    notify_msg = []
+
+    for idx, account in enumerate(accounts, 1):
+        username = account['username']
+        logger.info("-" * 40)
+        logger.info(f"▶️ [ {idx} / {len(accounts)} ] 正在执行账号: {username}")
+        
+        msg = run_sign_in(username, account['password'])
+        notify_msg.append(msg)
+        
+        if idx < len(accounts):
+            logger.info("⏳ 延时冷却 5 秒后继续下一个账号...")
+            time.sleep(5)
+
+    logger.info("=" * 60)
+    logger.info("🎉 所有账号处理流程结束！")
+    send_notification("雨云签到执行结果", "\n".join(notify_msg))
